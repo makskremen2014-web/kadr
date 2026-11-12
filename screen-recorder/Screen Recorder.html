@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кадр — запись экрана</title>
+<style>
+  :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #111214; color: #f1f2ef; --accent: #d8fc78; --muted: #a6aba4; --line: #323633; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  header, main { width: min(1120px, calc(100% - 48px)); margin: auto; }
+  header { height: 76px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+  .brand { font-size: 23px; font-weight: 750; letter-spacing: -.04em; }
+  .brand::before { content: ""; display: inline-block; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; margin-right: 11px; }
+  .quiet, small { color: var(--muted); }
+  main { padding: 45px 0; }
+  h1 { font-size: clamp(34px, 6vw, 58px); margin: 0 0 22px; letter-spacing: -.055em; line-height: 1.05; }
+  h2 { font-size: 19px; margin: 0 0 16px; }
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 294px; gap: 16px; align-items: start; }
+  .panel { background: #1b1d1e; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .bar, .controls { padding: 13px 16px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  .bar { justify-content: space-between; }
+  #timer { font: 600 15px ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .stage { aspect-ratio: 16 / 9; position: relative; display: grid; place-items: center; background: repeating-linear-gradient(0deg, #222724 0 1px, transparent 1px 29px), repeating-linear-gradient(90deg, #222724 0 1px, transparent 1px 29px), radial-gradient(ellipse, #242d21, #101211 72%); }
+  .empty { text-align: center; padding: 12px; }
+  .reticle { display: grid; place-items: center; height: 58px; width: 72px; border: 1px solid #94ab6b; border-radius: 12px; margin: 0 auto 14px; }
+  .reticle::after { content: ""; width: 16px; height: 16px; border: 1px solid var(--accent); border-radius: 50%; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; background: #101211; object-fit: contain; }
+  [hidden] { display: none !important; }
+  button, .download { font: inherit; font-weight: 650; padding: 10px 13px; border-radius: 8px; background: #292d2b; color: inherit; border: 1px solid #424742; cursor: pointer; text-decoration: none; }
+  button:hover:not(:disabled), .download:hover { filter: brightness(1.15); }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .primary, .download { background: var(--accent); color: #18200d; border-color: var(--accent); }
+  aside { padding: 17px; }
+  fieldset { padding: 0; border: 0; margin: 0; min-width: 0; }
+  .mode { display: flex; gap: 10px; align-items: start; padding: 11px; background: #232624; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; cursor: pointer; }
+  .mode:has(input:checked) { border-color: #879a5c; background: #2c3524; }
+  .mode small { display: block; margin-top: 3px; }
+  input { accent-color: var(--accent); }
+  select { display: block; width: 100%; margin: 8px 0 14px; padding: 9px; background: #232624; color: inherit; border: 1px solid #424742; border-radius: 8px; font: inherit; }
+  .audio { display: block; margin: 12px 0; }
+  .hint, #notice { color: var(--muted); line-height: 1.45; font-size: 14px; }
+  #notice { margin: 0; padding: 0 16px 13px; }
+  #notice:empty { display: none; }
+  #desktop-status:empty { display: none; }
+  #status[data-active="true"] { color: #ff9b94; }
+  #recordings { margin-top: 26px; }
+  #clips { display: grid; gap: 8px; padding: 0; list-style: none; }
+  #clips li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px; }
+  .clip-name { flex: 1 1 180px; overflow-wrap: anywhere; }
+  @media (max-width: 750px) { .workspace { grid-template-columns: 1fr; } header, main { width: calc(100% - 28px); } main { padding-top: 28px; } }
+</style>
+</head>
+<body>
+<header><div class="brand">Кадр</div><span class="quiet">Локальный рекордер</span></header>
+<main>
+  <h1>Запись экрана</h1>
+  <div class="workspace">
+    <section class="panel" aria-label="Управление записью">
+      <div class="bar"><span id="status" role="status">Готово к записи</span><time id="timer">00:00:00</time></div>
+      <div class="stage">
+        <div class="empty" id="empty"><div class="reticle" aria-hidden="true"></div><span id="preview-label">Здесь появится предпросмотр</span></div>
+        <video id="preview" aria-label="Предпросмотр записи" playsinline hidden></video>
+      </div>
+      <div class="controls">
+        <button id="start" class="primary">Начать запись</button>
+        <button id="pause" disabled>Пауза</button>
+        <button id="stop" disabled>Завершить</button>
+      </div>
+      <p id="notice" role="status"></p>
+    </section>
+    <aside class="panel">
+      <h2 id="settings-title">Настройки</h2>
+      <fieldset id="settings" aria-labelledby="settings-title">
+        <label class="mode"><input type="radio" name="mode" value="screen" checked><span>Экран<small>До 30 кадров/с</small></span></label>
+        <label class="mode"><input type="radio" name="mode" value="game"><span>Игровой режим<small>До 60 кадров/с</small></span></label>
+        <label class="audio"><input id="system" type="checkbox" checked> Звук выбранного источника</label>
+        <label class="audio"><input id="microphone" type="checkbox"> Микрофон</label>
+        <label for="quality">Качество видео</label>
+        <select id="quality"><option value="3">Экономное — 3 Мбит/с</option><option value="6" selected>Стандартное — 6 Мбит/с</option><option value="12">Высокое — 12 Мбит/с</option></select>
+        <label for="limit">Максимальный размер записи</label>
+        <select id="limit"><option value="256">256 МБ</option><option value="512" selected>512 МБ</option><option value="1024">1 ГБ</option></select>
+        <p class="hint">При достижении лимита запись завершится автоматически. Видео хранится в памяти до сохранения или удаления.</p>
+      </fieldset>
+      <p id="hint" class="hint">В окне браузера выберите экран, окно или вкладку.</p>
+      <section id="desktop-keys" hidden aria-label="Глобальные горячие клавиши">
+        <h2>Горячие клавиши</h2>
+        <p class="hint"><kbd>Ctrl+Alt+F9</kbd> — начать или завершить<br>
+        <kbd>Ctrl+Alt+F10</kbd> — пауза или продолжение<br>
+        <kbd>Ctrl+Alt+F11</kbd> — показать или скрыть FPS</p>
+        <p class="hint">Для FPS переключитесь на игру в оконном режиме без рамки и нажмите Ctrl+Alt+F11. Windows может запросить права администратора.</p>
+        <p id="desktop-status" class="hint" role="status"></p>
+      </section>
+    </aside>
+  </div>
+  <section id="recordings" aria-labelledby="clips-title">
+    <h2 id="clips-title">Записи этой сессии</h2>
+    <p id="clip-hint" class="hint">Сохраните нужные видео перед закрытием. Записи этой сессии не восстанавливаются после перезапуска.</p>
+    <ul id="clips"></ul>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  const preview = $('preview');
+  const notices = $('notice');
+  const mode = () => document.querySelector('input[name="mode"]:checked').value;
+  const supported = Boolean(navigator.mediaDevices?.getDisplayMedia && window.MediaRecorder);
+  const recordings = new Map();
+  const desktop = window.chrome?.webview;
+  let session;
+  let phase = 'idle';
+
+  function updateHint() {
+    $('hint').textContent = mode() === 'game'
+      ? 'Выберите окно игры. Если окно недоступно, выберите весь экран.'
+      : 'В окне браузера выберите экран, окно или вкладку.';
+  }
+
+  function updateControls(status, nextPhase = 'idle') {
+    phase = nextPhase;
+    $('status').textContent = status;
+    $('status').dataset.active = phase === 'recording';
+    $('start').disabled = !supported || phase !== 'idle';
+    $('settings').disabled = phase !== 'idle';
+    const active = phase === 'recording' || phase === 'paused';
+    $('pause').disabled = !active;
+    $('pause').textContent = phase === 'paused' ? 'Продолжить' : 'Пауза';
+    $('stop').disabled = !active;
+    for (const button of $('clips').querySelectorAll('button')) button.disabled = phase !== 'idle';
+  }
+
+  function showPreview(source, label = 'Здесь появится предпросмотр') {
+    preview.pause();
+    preview.removeAttribute('src');
+    preview.srcObject = null;
+    preview.hidden = !source;
+    $('empty').hidden = Boolean(source);
+    $('preview-label').textContent = label;
+    preview.controls = typeof source === 'string';
+    preview.muted = !preview.controls;
+    if (preview.controls) preview.src = source;
+    else if (source) {
+      preview.srcObject = source;
+      preview.play().catch(() => {});
+    } else preview.load();
+  }
+
+  function tick(current) {
+    const ms = current.elapsed + (current.started === null ? 0 : performance.now() - current.started);
+    const seconds = Math.floor(ms / 1000);
+    $('timer').textContent = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+      .map(value => String(value).padStart(2, '0')).join(':');
+  }
+
+  function freezeTimer(current) {
+    if (current.started !== null) current.elapsed += performance.now() - current.started;
+    current.started = null;
+    clearInterval(current.interval);
+    tick(current);
+  }
+
+  function release(current) {
+    for (const stream of current.streams) {
+      for (const track of stream.getTracks()) track.stop();
+    }
+    if (current.audioContext) current.audioContext.close().catch(() => {});
+  }
+
+  function saveClip(blob, game) {
+    const extension = blob.type.startsWith('video/mp4') ? 'mp4' : 'webm';
+    const timestamp = new Date().toISOString().slice(0, 19).replaceAll(':', '-');
+    const filename = `kadr-${game ? 'game' : 'screen'}-${timestamp}.${extension}`;
+    const url = URL.createObjectURL(blob);
+    const row = document.createElement('li');
+    row.className = 'panel';
+    const title = document.createElement('span');
+    title.className = 'clip-name';
+    title.textContent = `${filename} · ${(blob.size / 1048576).toFixed(1)} МБ`;
+    const play = document.createElement('button');
+    play.textContent = 'Смотреть';
+    play.onclick = () => {
+      showPreview(url);
+      preview.play().catch(() => {});
+      preview.scrollIntoView({ block: 'nearest' });
+    };
+    const download = document.createElement('a');
+    download.className = 'download';
+    download.href = url;
+    download.download = filename;
+    download.textContent = `Скачать ${extension.toUpperCase()}`;
+    // A browser download click does not confirm that the file was saved.
+    download.onclick = () => { if (!desktop) notices.textContent = 'Проверьте, что файл появился в загрузках. Браузер не сообщает приложению об успешном сохранении.'; };
+    const remove = document.createElement('button');
+    remove.textContent = 'Удалить';
+    remove.onclick = () => {
+      if (!recordings.get(url) && !window.confirm('Удалить запись? Если вы не сохранили файл, восстановить видео будет невозможно.')) return;
+      if (preview.getAttribute('src') === url) showPreview(null);
+      URL.revokeObjectURL(url);
+      recordings.delete(url);
+      row.remove();
+    };
+    row.append(title, play, download, remove);
+    $('clips').prepend(row);
+    recordings.set(url, false);
+    showPreview(url);
+  }
+
+  function finish(current) {
+    freezeTimer(current);
+    release(current);
+    session = null;
+    const blob = new Blob(current.chunks, { type: current.chunks[0]?.type || current.recorder.mimeType });
+    if (blob.size) {
+      saveClip(blob, current.game);
+      updateControls('Запись готова');
+    } else {
+      showPreview(null);
+      notices.textContent = 'Видео не сохранилось. Начните новую запись и дайте ей поработать несколько секунд.';
+      updateControls('Запись завершена');
+    }
+  }
+
+  function stop() {
+    const current = session;
+    if (!current?.recorder || current.recorder.state === 'inactive') return;
+    freezeTimer(current);
+    updateControls('Подготовка видео…', 'stopping');
+    current.recorder.stop();
+  }
+
+  async function start() {
+    if (session || !supported) return;
+    const game = mode() === 'game';
+    const withSystemAudio = $('system').checked;
+    const withMicrophone = $('microphone').checked;
+    const current = { game, streams: [], chunks: [], bytes: 0, limit: Number($('limit').value) * 1048576, elapsed: 0, started: null };
+    session = current;
+    tick(current);
+    notices.textContent = '';
+    const notes = [];
+    updateControls('Выбор источника…', 'starting');
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: game ? 60 : 30, max: game ? 60 : 30 }, displaySurface: game ? 'window' : 'monitor' },
+        audio: withSystemAudio,
+        systemAudio: withSystemAudio ? 'include' : 'exclude',
+        selfBrowserSurface: 'exclude'
+      });
+      current.streams.push(display);
+      const video = display.getVideoTracks()[0];
+      video.contentHint = game ? 'motion' : 'detail';
+      let audio = display.getAudioTracks();
+      if (withSystemAudio && !audio.length) notes.push('Источник не передаёт звук. Проверьте настройки звука в окне выбора браузера.');
+      if (withMicrophone) {
+        updateControls('Доступ к микрофону…', 'starting');
+        try {
+          const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+          current.streams.push(mic);
+          if (audio.length) {
+            const context = new AudioContext();
+            current.audioContext = context;
+            await context.resume();
+            const destination = context.createMediaStreamDestination();
+            current.streams.push(destination.stream);
+            for (const track of [...audio, ...mic.getAudioTracks()]) {
+              context.createMediaStreamSource(new MediaStream([track])).connect(destination);
+            }
+            audio = destination.stream.getAudioTracks();
+          } else {
+            audio = mic.getAudioTracks();
+          }
+        } catch {
+          notes.push('Микрофон недоступен. Запись продолжится без него.');
+        }
+      }
+      if (video.readyState === 'ended') throw new DOMException('', 'AbortError');
+      const stream = new MediaStream([video, ...audio]);
+      const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+        .find(type => MediaRecorder.isTypeSupported(type));
+      const options = { videoBitsPerSecond: Number($('quality').value) * 1_000_000 };
+      if (mimeType) options.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, options);
+      current.recorder = recorder;
+      recorder.ondataavailable = event => {
+        if (!event.data.size) return;
+        current.chunks.push(event.data);
+        current.bytes += event.data.size;
+        if (current.bytes >= current.limit && recorder.state !== 'inactive') {
+          notices.textContent = 'Достигнут лимит размера. Сохраните видео и начните новую запись.';
+          stop();
+        }
+      };
+      recorder.onerror = () => { notices.textContent = 'Запись прервана браузером.'; };
+      recorder.onstop = () => finish(current);
+      video.addEventListener('ended', stop, { once: true });
+      recorder.start(1000);
+      current.started = performance.now();
+      current.interval = setInterval(() => tick(current), 250);
+      notices.textContent = notes.join(' ');
+      // A live mirror of a monitor can become part of the capture.
+      if (video.getSettings().displaySurface === 'monitor') showPreview(null, 'Идёт запись всего экрана');
+      else showPreview(new MediaStream([video]));
+      updateControls('Идёт запись', 'recording');
+    } catch (error) {
+      release(current);
+      session = null;
+      notices.textContent = error.name === 'NotAllowedError' || error.name === 'AbortError'
+        ? 'Захват отменён или браузер не получил разрешение.'
+        : 'Не удалось начать запись. Проверьте доступ к экрану и попробуйте снова.';
+      updateControls('Готово к записи');
+    }
+  }
+
+  $('start').onclick = start;
+  $('stop').onclick = stop;
+  $('pause').onclick = () => {
+    if (!session) return;
+    if (session.recorder.state === 'recording') {
+      session.recorder.pause();
+      freezeTimer(session);
+      updateControls('Пауза', 'paused');
+    } else if (session.recorder.state === 'paused') {
+      session.recorder.resume();
+      session.started = performance.now();
+      session.interval = setInterval(() => tick(session), 250);
+      updateControls('Идёт запись', 'recording');
+    }
+  };
+  function persistSettings() {
+    updateHint();
+    try { localStorage.setItem('kadr.settings.v1', JSON.stringify({ mode: mode(), system: $('system').checked, microphone: $('microphone').checked, quality: $('quality').value, limit: $('limit').value })); } catch { /* Storage may be disabled. */ }
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem('kadr.settings.v1') || '{}');
+    if (saved.mode === 'screen' || saved.mode === 'game') document.querySelector('input[value="' + saved.mode + '"]').checked = true;
+    for (const id of ['system', 'microphone']) if (typeof saved[id] === 'boolean') $(id).checked = saved[id];
+    for (const id of ['quality', 'limit']) if ([...$(id).options].some(option => option.value === saved[id])) $(id).value = saved[id];
+  } catch { /* Ignore unavailable or corrupt preferences. */ }
+  $('settings').onchange = persistSettings;
+  updateHint();
+  window.kadr = {
+    isIdle: () => phase === 'idle',
+    hotkey(action) {
+      if (action === 'record' && phase === 'idle') start();
+      else if (action === 'record') stop();
+      else if (action === 'pause' && (phase === 'recording' || phase === 'paused')) $('pause').click();
+    },
+    closeState: () => phase !== 'idle' ? 2 : Number([...recordings.values()].includes(false))
+  };
+  if (desktop) {
+    $('desktop-keys').hidden = false;
+    desktop.addEventListener('message', event => {
+      if (event.data.startsWith('saved:')) {
+        const url = event.data.slice(6);
+        if (recordings.has(url)) recordings.set(url, true);
+      } else $('desktop-status').textContent = event.data;
+    });
+  }
+  window.addEventListener('beforeunload', event => {
+    if (!desktop && (session || [...recordings.values()].includes(false))) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+  if (!supported) {
+    updateControls('Запись недоступна');
+    notices.textContent = 'Откройте этот файл в настольном Chrome или Microsoft Edge.';
+  }
+</script>
+</body>
+</html>
